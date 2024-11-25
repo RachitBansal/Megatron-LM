@@ -3,7 +3,6 @@ import logging
 from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
-
 try:
     from transformer_engine.pytorch.optimizers import FusedAdam as Adam
     from transformer_engine.pytorch.optimizers import FusedSGD as SGD
@@ -82,10 +81,12 @@ def _get_param_groups(
     params_map = {}
     for model_chunk in model_chunks:
         for name, param in model_chunk.named_parameters():
+            # print(f"name: {name}, param: {param}")
             if not param.requires_grad:
                 continue
 
             is_expert_parallel = not getattr(param, 'allreduce', True)
+            is_moe_expert = 'expert' in name
 
             if no_weight_decay_cond is not None:
                 no_wd = no_weight_decay_cond(name, param)
@@ -115,19 +116,20 @@ def _get_param_groups(
             ):
                 is_decoupled_lr = True
 
-            key = (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr)
+            key = (wd_mult, _lr_mult, is_expert_parallel, is_moe_expert, is_decoupled_lr)
             if key not in params_map:
                 params_map[key] = []
             params_map[key].append(param)
 
     param_groups = []
-    for (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr), params in params_map.items():
+    for (wd_mult, _lr_mult, is_expert_parallel, is_moe_expert, is_decoupled_lr), params in params_map.items():
         assert len(params) > 0
         param_group = {
             'params': params,
             'wd_mult': wd_mult,
             'lr_mult': _lr_mult,
             'is_expert_parallel': is_expert_parallel,
+            'is_moe_expert': is_moe_expert,
             'is_decoupled_lr': is_decoupled_lr,
         }
         param_groups.append(param_group)
@@ -413,7 +415,7 @@ def get_megatron_optimizer(
     moe_param_groups, moe_buffers = _get_param_groups_and_buffers(
         model_chunks,
         model_chunk_offset=0,
-        config=config,
+        config=config_moe if config_moe is not None else config,
         no_weight_decay_cond=no_weight_decay_cond,
         scale_lr_cond=scale_lr_cond,
         lr_mult=lr_mult,
@@ -421,6 +423,7 @@ def get_megatron_optimizer(
         buffer_name='expert_parallel_buffers',
     )
     if len(moe_param_groups) > 0:
+        # print(f"MOE param groups w/ expert_parallel: {moe_param_groups}")
         model_parallel_world_size = torch.distributed.get_world_size(mpu.get_model_parallel_group())
         expert_parallel_rank = mpu.get_expert_model_parallel_rank()
         optimizers.append(
@@ -440,6 +443,33 @@ def get_megatron_optimizer(
                 + model_parallel_rank,
             )
         )
+    # elif config_moe is not None:
+    #     moe_param_groups, moe_buffers = _get_param_groups_and_buffers(
+    #         model_chunks,
+    #         model_chunk_offset=0,
+    #         config=config_moe,
+    #         no_weight_decay_cond=no_weight_decay_cond,
+    #         scale_lr_cond=scale_lr_cond,
+    #         lr_mult=lr_mult,
+    #         filter_fn=lambda g: g['is_moe_expert'],
+    #         buffer_name='moe_expert_buffers',
+    #     )
+    #     if len(moe_param_groups) > 0:
+    #         # print(f"MOE param groups: {moe_param_groups}")
+    #         optimizers.append(
+    #             _get_megatron_optimizer_based_on_param_groups(
+    #                 config_moe,
+    #                 model_chunks=model_chunks,
+    #                 param_groups=moe_param_groups,
+    #                 per_model_buffers=moe_buffers,
+    #                 model_parallel_group=mpu.get_model_parallel_group(),
+    #                 data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
+    #                 data_parallel_group_gloo=mpu.get_data_parallel_group_gloo(
+    #                     with_context_parallel=True
+    #                 ),
+    #                 data_parallel_group_idx=model_parallel_rank,
+    #             )
+    #         )
 
     if len(optimizers) == 1:
         return optimizers[0]

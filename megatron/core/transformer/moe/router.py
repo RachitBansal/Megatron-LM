@@ -39,17 +39,18 @@ class Router(ABC, MegatronModule):
         self.layer_number = None
 
         # Initialize the gate weights.
-        self.weight = torch.nn.Parameter(
-            torch.empty((self.config.num_moe_experts, self.config.hidden_size), dtype=torch.float32)
-        )
-        if config.perform_initialization:
-            if get_cuda_rng_tracker().is_initialized():
-                with get_cuda_rng_tracker().fork(get_data_parallel_rng_tracker_name()):
-                    config.init_method(self.weight)
-        else:
-            config.init_method(self.weight)
-        self.weight.data = self.weight.data.to(dtype=config.params_dtype)
-        setattr(self.weight, 'sequence_parallel', config.sequence_parallel)
+        if self.config.moe_router_load_balancing_type != "random":
+            self.weight = torch.nn.Parameter(
+                torch.empty((self.config.num_moe_experts, self.config.hidden_size), dtype=torch.float32)
+            )
+            if config.perform_initialization:
+                if get_cuda_rng_tracker().is_initialized():
+                    with get_cuda_rng_tracker().fork(get_data_parallel_rng_tracker_name()):
+                        config.init_method(self.weight)
+            else:
+                config.init_method(self.weight)
+            self.weight.data = self.weight.data.to(dtype=config.params_dtype)
+            setattr(self.weight, 'sequence_parallel', config.sequence_parallel)
 
     def gating(self, input: torch.Tensor):
         """Forward pass of the router gate.
@@ -165,6 +166,31 @@ class TopKRouter(Router):
             probs = self.apply_load_balancing_loss(scores, tokens_per_expert, activation=probs)
         return probs, indices
 
+    def random_routing(self, logits: torch.Tensor):
+        """Random routing function.
+
+        This function selects top-k experts randomly, ignoring the logits.
+
+        Args:
+            logits (torch.Tensor): The logits tensor.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: scores and indices tensors.
+        """
+        batch_size = logits.size(0)
+        num_experts = self.config.num_moe_experts
+        topk = self.topk
+
+        # Generate random indices of experts for each sample
+        indices = torch.randint(
+            low=0, high=num_experts, size=(batch_size, topk), device=logits.device
+        )
+
+        # Assign equal probability to each selected expert
+        scores = torch.full((batch_size, topk), 1.0 / topk, device=logits.device, dtype=logits.dtype)
+
+        return scores, indices
+
     def apply_load_balancing_loss(
         self,
         probs: torch.Tensor,
@@ -274,6 +300,8 @@ class TopKRouter(Router):
             scores, indices = self.sinkhorn_load_balancing(logits)
         elif self.routing_type == "aux_loss":
             scores, indices = self.aux_loss_load_balancing(logits)
+        elif self.routing_type == "random":
+            scores, indices = self.random_routing(logits)
         elif self.routing_type == "none":
             # A naive top-k routing without load balancing
             scores, indices, _ = topk_softmax_with_capacity(
@@ -301,9 +329,13 @@ class TopKRouter(Router):
 
         # Apply input jitter
         input = self.apply_input_jitter(input)
-        logits = self.gating(input)
-        logits = logits.view(-1, self.config.num_moe_experts)
-
+        if self.routing_type != "random":
+            logits = self.gating(input)
+            logits = logits.view(-1, self.config.num_moe_experts)
+        else:
+            logits = torch.randn(
+                *input.shape[:-1], self.config.num_moe_experts, device=input.device, dtype=torch.bfloat16
+            )
         scores, indices = self.routing(logits)
 
         return scores, indices

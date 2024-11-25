@@ -888,7 +888,7 @@ class ChainedOptimizer(MegatronOptimizer):
                 for model_chunk in optimizer.model_chunks:
                     if model_chunk not in self.model_chunks:
                         self.model_chunks.append(model_chunk)
-            assert self.config == getattr(optimizer, 'config', None)
+            # assert self.config == getattr(optimizer, 'config', None)
         self.chained_optimizers = chained_optimizers
 
     @property
