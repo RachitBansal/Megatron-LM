@@ -367,7 +367,8 @@ def get_megatron_optimizer(
     """
 
     log_single_rank(logger, logging.INFO, f'Setting up optimizer with config {config}')
-
+    print(config, flush=True)
+    print(config_moe, flush=True)
     # Separate out first model chunk if overlapping param AG with optimizer step.
     if config.overlap_param_gather_with_optimizer_step:
         all_dense_model_chunks = [[model_chunks[0]], model_chunks[1:]]

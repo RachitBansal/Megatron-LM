@@ -320,7 +320,9 @@ class GPTDataset(MegatronDataset):
         Returns:
             Tuple[numpy.ndarray, numpy.ndarray]: The document index, the sample index, and the shuffle index
         """
-        path_to_cache = self.config.path_to_cache
+        # Alex: hardcoded
+        # path_to_cache = self.config.path_to_cache
+        path_to_cache = "/n/netscratch/kempner_pehlevan_lab/Everyone/ameterez/dolma_data_cache"
         if path_to_cache is None and not self.config.mock:
             path_to_cache = os.path.join(
                 self.dataset.path_prefix, "cache", f"{type(self).__name__}_indices"
