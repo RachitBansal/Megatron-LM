@@ -444,33 +444,6 @@ def get_megatron_optimizer(
                 + model_parallel_rank,
             )
         )
-    # elif config_moe is not None:
-    #     moe_param_groups, moe_buffers = _get_param_groups_and_buffers(
-    #         model_chunks,
-    #         model_chunk_offset=0,
-    #         config=config_moe,
-    #         no_weight_decay_cond=no_weight_decay_cond,
-    #         scale_lr_cond=scale_lr_cond,
-    #         lr_mult=lr_mult,
-    #         filter_fn=lambda g: g['is_moe_expert'],
-    #         buffer_name='moe_expert_buffers',
-    #     )
-    #     if len(moe_param_groups) > 0:
-    #         # print(f"MOE param groups: {moe_param_groups}")
-    #         optimizers.append(
-    #             _get_megatron_optimizer_based_on_param_groups(
-    #                 config_moe,
-    #                 model_chunks=model_chunks,
-    #                 param_groups=moe_param_groups,
-    #                 per_model_buffers=moe_buffers,
-    #                 model_parallel_group=mpu.get_model_parallel_group(),
-    #                 data_parallel_group=mpu.get_data_parallel_group(with_context_parallel=True),
-    #                 data_parallel_group_gloo=mpu.get_data_parallel_group_gloo(
-    #                     with_context_parallel=True
-    #                 ),
-    #                 data_parallel_group_idx=model_parallel_rank,
-    #             )
-    #         )
 
     if len(optimizers) == 1:
         return optimizers[0]
